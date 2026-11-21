@@ -33,11 +33,13 @@ export function TeamChat({
 
   return (
     <section className="chat">
-      <header className="chat-head">
-        <h2>Team chat</h2>
-        <span className="muted">
-          {online.length > 0 ? `${online.map((p) => p.displayName).join(', ')} online` : 'nobody else here'}
+      <header className="pane-head">
+        <span className="pane-meta">
+          {online.length > 0
+            ? `${online.map((p) => p.displayName).join(', ')} online`
+            : 'nobody else here'}
         </span>
+        <span className="pane-meta">the agent never sees this</span>
       </header>
 
       <div className="chat-messages">

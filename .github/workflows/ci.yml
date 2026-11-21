@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 26 is what this is developed on; 22 is the oldest we claim to
+        # support. The first CI run failed only on 22, so test both.
+        node: [22, 26]
+    name: checks (node ${{ matrix.node }})
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # node-pty's shipped binding is not usable on every platform; build it
+      # only when it fails to load. The server imports it at startup even
+      # though these suites open no terminals.
+      - name: Ensure node-pty loads
+        run: node -e "require('node-pty')" || (cd node_modules/node-pty && npx node-gyp rebuild)
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      # The suites below talk to a running server. No ANTHROPIC_API_KEY is set
+      # in CI, so the server uses its stub provider: the queue, tools, approval
+      # cards and sockets are all exercised, without spending money or
+      # depending on what a model decides to say.
+      - name: Start the server
+        run: |
+          npx tsx server/src/index.ts &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3001/api/me && break
+            sleep 1
+          done
+        env:
+          COOKIE_SECRET: ci-only-secret
+
+      - name: Editor, security and resilience suites
+        run: |
+          node tests/e2e/01-editor.mjs
+          node tests/e2e/08-security.mjs
+          node tests/e2e/09-resilience.mjs

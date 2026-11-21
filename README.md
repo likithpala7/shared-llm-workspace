@@ -39,15 +39,42 @@ either way.
 
 ## Tests
 
-End-to-end suites live in `tests/e2e`, one per milestone. They run against a
-server that is already up and exercise the real thing — real Yjs documents,
-real containers, and the real model when `ANTHROPIC_API_KEY` is set.
+Three tiers, cheapest first.
+
+**Unit** — pure logic, no server, no network, runs in a quarter of a second.
+Covers the text-merge maths that keeps terminal writes from eating unsaved
+typing, workspace path containment, and token signing.
 
 ```bash
-npm run dev           # in one terminal
-npm run test:e2e      # in another
+npm test            # typecheck + unit tests
+npm run test:unit
+```
+
+**End to end** — one suite per milestone plus security and resilience, against
+a server that is already up. Real Yjs documents, real containers and shells,
+and the real model when `ANTHROPIC_API_KEY` is set.
+
+```bash
+npm run dev              # in one terminal
+npm run test:e2e         # in another
 npm run test:e2e -- 04   # just the terminals suite
 ```
+
+| Suite | What it holds the line on |
+| --- | --- |
+| `01-editor` | two tabs, live cursors, debounced writes, refresh |
+| `02-thread` | queue order, attribution, cancel, Stop |
+| `03-tools` | agent edits landing live while someone types |
+| `04-terminals` | a shell each, and a formatter racing a typist |
+| `05-approvals` | first click wins, denial, the queue blocking |
+| `06-chat` | chat, presence, and the agent's lack of a read path |
+| `07-summaries` | recall of who asked what, across merges |
+| `08-security` | path traversal, cross-workspace access, forged tokens, oversized input |
+| `09-resilience` | restarts: no duplication, queue resumes, nothing left pending |
+
+**Without a key**, the server falls back to its stub provider and suites 01, 08
+and 09 still pass — that is what CI runs on every push, so no API spend is
+needed to catch a regression in sync, auth or restart handling.
 
 `07-summaries` is skipped by default: it needs a server started with a small
 budget so the rolling summary triggers in a handful of turns.

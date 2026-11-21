@@ -4,8 +4,10 @@
 //   npm run test:e2e            all suites
 //   npm run test:e2e -- 03      only suites whose name contains "03"
 //
-// 07-summaries needs a server started with a small SUMMARY_TOKEN_BUDGET, so it
-// is skipped unless TEST_API points at one.
+// Suites 01-06 and 08 run against a server that is already up. 09 starts and
+// kills its own servers on a scratch data directory. 07-summaries needs a
+// server with a small SUMMARY_TOKEN_BUDGET, so the runner skips it; see the
+// README for its two-line invocation.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

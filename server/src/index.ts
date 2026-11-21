@@ -26,7 +26,29 @@ import { hocuspocus } from './sync.js';
 fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
 
 const app = express();
-app.use(express.json());
+// Large enough for a long request or a file the agent writes, small enough
+// that nobody can post a gigabyte at us.
+app.use(express.json({ limit: '1mb' }));
+
+/**
+ * Body-parser failures land here. Without this, Express answers with an HTML
+ * error page, which breaks every client that expects JSON.
+ */
+app.use((
+  error: Error & { status?: number; type?: string },
+  _req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+) => {
+  if (!error) return next();
+  const status = error.status ?? 500;
+  if (status === 413) return res.status(413).json({ error: 'request is too large' });
+  if (error.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'body is not valid JSON' });
+  }
+  console.error('[http]', error);
+  res.status(status).json({ error: status === 500 ? 'internal error' : error.message });
+});
 
 const newId = () => crypto.randomBytes(8).toString('hex');
 const newToken = () => crypto.randomBytes(16).toString('base64url');
@@ -186,6 +208,9 @@ app.post('/api/workspaces/:id/ai', (req, res) => {
   }
   const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
   if (!content) return res.status(400).json({ error: 'content is required' });
+  if (content.length > 20_000) {
+    return res.status(400).json({ error: 'request is too long (20,000 characters max)' });
+  }
   res.json({ message: enqueueRequest(req.params.id, user!.id, content) });
 });
 

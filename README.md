@@ -72,9 +72,34 @@ npm run test:e2e -- 04   # just the terminals suite
 | `08-security` | path traversal, cross-workspace access, forged tokens, oversized input |
 | `09-resilience` | restarts: no duplication, queue resumes, nothing left pending |
 
-**Without a key**, the server falls back to its stub provider and suites 01, 08
-and 09 still pass — that is what CI runs on every push, so no API spend is
-needed to catch a regression in sync, auth or restart handling.
+**Load** — how it behaves with a crowd. Run against a stub-provider server so
+the shape is tested without spending.
+
+```bash
+EDITORS=50 EDITS=30 node tests/load/editors.mjs   # convergence under concurrency
+REQUESTS=20 node tests/load/queue.mjs             # FIFO under a pile-on
+TABS=40 node tests/load/sockets.mjs               # fan-out and presence
+```
+
+**Browser** — Playwright, driving two real browser contexts as two people.
+Every layout regression this project has had was visual, so these assert what
+a person can actually see and reach.
+
+```bash
+npm run test:ui
+npx playwright test tests/ui/layout.spec.mjs
+```
+
+| Spec | What it holds the line on |
+| --- | --- |
+| `layout` | the page never scrolls; every message stays reachable inside its pane; neither tab is a sliver |
+| `collaboration` | live typing, named remote cursors, file tree, presence, chat, unread badge |
+| `approvals` | a card appears for the person who did not ask, and either may decide it |
+| `terminal` | a shell runs a command and the result reaches the other person's tree |
+
+**Without a key**, the server falls back to its stub provider and the editor,
+security, resilience, load and browser suites all still pass — that is what CI
+runs on every push, so no API spend is needed to catch a regression.
 
 `07-summaries` is skipped by default: it needs a server started with a small
 budget so the rolling summary triggers in a handful of turns.

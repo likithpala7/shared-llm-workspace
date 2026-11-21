@@ -10,3 +10,7 @@ data
 
 # Scratch test harnesses (kept out of the repo)
 .e2e-*.mjs
+
+# Browser test output
+test-results
+playwright-report

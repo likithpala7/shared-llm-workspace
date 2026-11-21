@@ -37,6 +37,30 @@ Without one, the server logs `LLM provider: stub` and the agent replies with a
 canned message. The queue, attribution, streaming, cancel and Stop all work
 either way.
 
+## Tests
+
+End-to-end suites live in `tests/e2e`, one per milestone. They run against a
+server that is already up and exercise the real thing — real Yjs documents,
+real containers, and the real model when `ANTHROPIC_API_KEY` is set.
+
+```bash
+npm run dev           # in one terminal
+npm run test:e2e      # in another
+npm run test:e2e -- 04   # just the terminals suite
+```
+
+`07-summaries` is skipped by default: it needs a server started with a small
+budget so the rolling summary triggers in a handful of turns.
+
+```bash
+PORT=3006 SUMMARY_TOKEN_BUDGET=400 npx tsx server/src/index.ts
+TEST_API=http://localhost:3006 node tests/e2e/07-summaries.mjs
+```
+
+They talk to a real model, so a full run costs a few cents and leaves test
+workspaces in `data/` and stopped containers behind. Clean the containers with
+`docker rm -f $(docker ps -aq --filter label=slw.workspace)`.
+
 ## What is built
 
 | Piece | Where |

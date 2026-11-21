@@ -10,6 +10,9 @@ import { TeamChat } from '../components/TeamChat';
 import { clearIdentity, loadIdentity, saveIdentity, type Identity } from '../lib/identity';
 
 const lastFileKey = (workspaceId: string) => `slw_last_file:${workspaceId}`;
+const paneKey = 'slw_right_pane';
+
+type RightPane = 'thread' | 'chat';
 
 function firstEditableFile(nodes: TreeNode[]): string | null {
   for (const node of nodes) {
@@ -34,6 +37,12 @@ export function WorkspacePage({ workspaceId, navigate }: { workspaceId: string; 
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [chat, setChat] = useState<TeamMessage[]>([]);
   const [online, setOnline] = useState<PresenceEntry[]>([]);
+  const [pane, setPane] = useState<RightPane>(
+    () => (localStorage.getItem(paneKey) as RightPane | null) ?? 'thread',
+  );
+  // What each pane had when you last looked at it, so the hidden one can show
+  // that something arrived.
+  const [seen, setSeen] = useState({ thread: 0, chat: 0 });
   const chatRef = useRef<{ send: (content: string) => void } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -164,6 +173,20 @@ export function WorkspacePage({ workspaceId, navigate }: { workspaceId: string; 
     };
   }, [workspaceId, identity, refreshFiles]);
 
+  // Whichever pane is open is caught up by definition.
+  useEffect(() => {
+    setSeen((current) =>
+      pane === 'thread'
+        ? { ...current, thread: thread.length }
+        : { ...current, chat: chat.length },
+    );
+  }, [pane, thread.length, chat.length]);
+
+  function selectPane(next: RightPane) {
+    setPane(next);
+    localStorage.setItem(paneKey, next);
+  }
+
   function openFile(filePath: string) {
     setActivePath(filePath);
     localStorage.setItem(lastFileKey(workspaceId), filePath);
@@ -288,24 +311,53 @@ export function WorkspacePage({ workspaceId, navigate }: { workspaceId: string; 
       </main>
 
       <div className="right-column">
-        <AiThread
-          workspaceId={workspaceId}
-          messages={thread}
-          toolCalls={toolCalls}
-          onDecide={decideToolCall}
-          currentUserId={identity.userId}
-          busy={busy}
-          onSend={sendRequest}
-          onCancel={cancelRequest}
-          onStop={stopTurn}
-        />
+        <div className="pane-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pane === 'thread'}
+            className={pane === 'thread' ? 'pane-tab active' : 'pane-tab'}
+            onClick={() => selectPane('thread')}
+          >
+            AI thread
+            {pane !== 'thread' && thread.length > seen.thread && (
+              <span className="pane-badge">{thread.length - seen.thread}</span>
+            )}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={pane === 'chat'}
+            className={pane === 'chat' ? 'pane-tab active' : 'pane-tab'}
+            onClick={() => selectPane('chat')}
+          >
+            Team chat
+            {pane !== 'chat' && chat.length > seen.chat && (
+              <span className="pane-badge">{chat.length - seen.chat}</span>
+            )}
+          </button>
+        </div>
 
-        <TeamChat
-          messages={chat}
-          currentUserId={identity.userId}
-          online={online.filter((p) => p.userId !== identity.userId)}
-          onSend={(content) => chatRef.current?.send(content)}
-        />
+        {pane === 'thread' ? (
+          <AiThread
+            workspaceId={workspaceId}
+            messages={thread}
+            toolCalls={toolCalls}
+            onDecide={decideToolCall}
+            currentUserId={identity.userId}
+            busy={busy}
+            onSend={sendRequest}
+            onCancel={cancelRequest}
+            onStop={stopTurn}
+          />
+        ) : (
+          <TeamChat
+            messages={chat}
+            currentUserId={identity.userId}
+            online={online.filter((p) => p.userId !== identity.userId)}
+            onSend={(content) => chatRef.current?.send(content)}
+          />
+        )}
       </div>
     </div>
   );

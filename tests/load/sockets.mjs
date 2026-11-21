@@ -64,17 +64,20 @@ const arrivals = delivered
 note(`fan-out p50 ${arrivals[Math.floor(arrivals.length / 2)]}ms · slowest ${arrivals.at(-1)}ms`);
 check('the slowest tab is still prompt', arrivals.at(-1) < 2000, `${arrivals.at(-1)}ms`);
 
-// Closing half of them must leave presence correct.
-for (const tab of eventTabs.slice(0, TABS / 2)) tab.socket.close();
+// Closing some of them must leave presence correct. Floor it: an odd TABS
+// would otherwise compare a count against a fraction.
+const closing = Math.floor(TABS / 2);
+const remaining = TABS - closing;
+for (const tab of eventTabs.slice(0, closing)) tab.socket.close();
 await sleep(1500);
 const after = eventTabs.at(-1).messages.filter((m) => m.type === 'presence').at(-1);
-check('presence drops the closed tabs',
-  after.online.reduce((sum, p) => sum + p.tabs, 0) === TABS / 2,
-  `${after.online.reduce((sum, p) => sum + p.tabs, 0)} tabs left`);
+const stillOpen = after.online.reduce((sum, p) => sum + p.tabs, 0);
+check('presence drops the closed tabs', stillOpen === remaining,
+  `${stillOpen} open, expected ${remaining} after closing ${closing} of ${TABS}`);
 
 const healthy = await call('GET', `/api/workspaces/${workspaceId}/files`, null, alice.token);
 check('the server is unharmed', healthy.status === 200);
 
-for (const tab of [...eventTabs.slice(TABS / 2), ...chatTabs]) tab.socket.close();
+for (const tab of [...eventTabs.slice(closing), ...chatTabs]) tab.socket.close();
 await sleep(400);
 finish();

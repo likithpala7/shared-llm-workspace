@@ -77,15 +77,14 @@ export function AiThread({
 
   return (
     <section className="thread">
-      <header className="thread-head">
-        <div>
-          <h2>AI thread</h2>
-          <p className="muted">
-            {queued.length > 0
-              ? `${queued.length} request${queued.length === 1 ? '' : 's'} waiting`
+      <header className="pane-head">
+        <span className="pane-meta">
+          {queued.length > 0
+            ? `${queued.length} request${queued.length === 1 ? '' : 's'} waiting`
+            : busy
+              ? 'running a turn'
               : 'one request at a time, in arrival order'}
-          </p>
-        </div>
+        </span>
         <div className="thread-head-actions">
           <button type="button" className="link" onClick={() => setShowMemory((v) => !v)}>
             {showMemory ? 'hide memory' : 'memory'}

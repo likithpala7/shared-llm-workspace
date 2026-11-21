@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # node-pty ships prebuilds that are not always usable; build it here so
+      # terminals work in the integration suites.
+      - name: Build node-pty
+        run: cd node_modules/node-pty && npx node-gyp rebuild
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      # The suites below talk to a running server. No ANTHROPIC_API_KEY is set
+      # in CI, so the server uses its stub provider: the queue, tools, approval
+      # cards and sockets are all exercised, without spending money or
+      # depending on what a model decides to say.
+      - name: Start the server
+        run: |
+          npm run dev:server &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3001/api/me && break
+            sleep 1
+          done
+        env:
+          COOKIE_SECRET: ci-only-secret
+
+      - name: Editor, security and resilience suites
+        run: |
+          node tests/e2e/01-editor.mjs
+          node tests/e2e/08-security.mjs
+          node tests/e2e/09-resilience.mjs

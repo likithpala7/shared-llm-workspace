@@ -36,7 +36,14 @@ export async function call(method, path, body, token) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
-  return { status: response.status, body: text ? JSON.parse(text) : null };
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    // Not JSON. Hand back the raw text so a suite can assert on it.
+    parsed = { raw: text.slice(0, 200) };
+  }
+  return { status: response.status, body: parsed };
 }
 
 /** A workspace with two members, as every suite needs. */

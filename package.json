@@ -9,7 +9,7 @@
     "dev:client": "npm --workspace client run dev",
     "build": "npm --workspace server run build && npm --workspace client run build",
     "typecheck": "npm --workspace server run typecheck && npm --workspace client run typecheck",
-    "test:unit": "node --import tsx --test tests/unit/",
+    "test:unit": "node --import tsx --test tests/unit/*.test.mjs",
     "test:e2e": "node tests/e2e/run.mjs",
     "test": "npm run typecheck && npm run test:unit"
   },

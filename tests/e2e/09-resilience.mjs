@@ -19,10 +19,12 @@ const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'slw-resilience-'));
 let child = null;
 
 async function startServer(extraEnv = {}) {
+  // Its own process group, so we can kill the whole tree without hunting
+  // for pids — npx is only a wrapper around the server we care about.
   child = spawn('npx', ['tsx', 'server/src/index.ts'], {
     env: { ...process.env, PORT: String(PORT), DATA_DIR, ...extraEnv },
     stdio: 'ignore',
-    detached: false,
+    detached: true,
   });
   for (let i = 0; i < 240; i++) {
     await sleep(250);
@@ -38,18 +40,27 @@ async function startServer(extraEnv = {}) {
 
 async function killServer() {
   if (!child) return;
-  // Kill whatever actually holds the port: npx is only a wrapper.
-  const { execSync } = await import('node:child_process');
   try {
-    // -sTCP:LISTEN matters: a bare `lsof -ti :PORT` also lists our own
-    // client sockets, and we would kill this very test process.
-    execSync(`lsof -ti :${PORT} -sTCP:LISTEN | xargs kill -9`, { stdio: 'ignore' });
+    process.kill(-child.pid, 'SIGKILL'); // the whole group
   } catch {
-    // nothing listening
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // already gone
+    }
   }
-  child.kill('SIGKILL');
   child = null;
-  await sleep(1000);
+
+  // Wait for the port to actually free up, or the next start races it.
+  for (let i = 0; i < 80; i++) {
+    await sleep(250);
+    try {
+      await fetch(`${BASE}/api/me`);
+    } catch {
+      return;
+    }
+  }
+  throw new Error('server would not stop');
 }
 
 const call = async (method, p, body, token) => {

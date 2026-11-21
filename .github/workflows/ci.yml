@@ -8,20 +8,28 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 26 is what this is developed on; 22 is the oldest we claim to
+        # support. The first CI run failed only on 22, so test both.
+        node: [22, 26]
+    name: checks (node ${{ matrix.node }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install
         run: npm ci
 
-      # node-pty ships prebuilds that are not always usable; build it here so
-      # terminals work in the integration suites.
-      - name: Build node-pty
-        run: cd node_modules/node-pty && npx node-gyp rebuild
+      # node-pty's shipped binding is not usable on every platform; build it
+      # only when it fails to load. The server imports it at startup even
+      # though these suites open no terminals.
+      - name: Ensure node-pty loads
+        run: node -e "require('node-pty')" || (cd node_modules/node-pty && npx node-gyp rebuild)
 
       - name: Typecheck
         run: npm run typecheck
@@ -35,7 +43,7 @@ jobs:
       # depending on what a model decides to say.
       - name: Start the server
         run: |
-          npm run dev:server &
+          npx tsx server/src/index.ts &
           for i in $(seq 1 60); do
             curl -sf -o /dev/null http://localhost:3001/api/me && break
             sleep 1

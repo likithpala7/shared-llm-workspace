@@ -231,6 +231,17 @@ class StubClient implements LlmClient {
       return answer;
     }
 
+    // "run the command \"npm test\"" — so the approval path can be exercised
+    // without a key.
+    const commandMatch = /run (?:the )?command[:\s]+["'`]?([^"'`]+)["'`]?/i.exec(request);
+    if (commandMatch) {
+      const command = commandMatch[1].trim();
+      await emit(`${who}, I will run \`${command}\` once someone approves it.`);
+      const outcome = await useTool('run_command', { command });
+      await emit(outcome.isError ? `It did not run: ${outcome.output}` : `Done:\n${outcome.output}`);
+      return answer;
+    }
+
     // "append a line to notes.md saying ..."
     if (/\b(append|add)\b/i.test(request) && fileMatch) {
       const path = fileMatch[1];
@@ -254,7 +265,8 @@ class StubClient implements LlmClient {
       return answer;
     }
 
-    await emit(`${who}, here is what the workspace holds.`);
+    await emit(`${who}, you asked: "${request.slice(0, 200)}".`);
+    await emit('Here is what the workspace holds:');
     const listing = await useTool('list_files', {});
     await emit(listing.output.split('\n').join(', '));
     await emit('(No ANTHROPIC_API_KEY is set, so this is the stub provider, not the model.)');

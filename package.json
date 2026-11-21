@@ -2,7 +2,10 @@
   "name": "shared-llm-workspace",
   "private": true,
   "type": "module",
-  "workspaces": ["server", "client"],
+  "workspaces": [
+    "server",
+    "client"
+  ],
   "scripts": {
     "dev": "concurrently -k -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
     "dev:server": "npm --workspace server run dev",
@@ -11,9 +14,11 @@
     "typecheck": "npm --workspace server run typecheck && npm --workspace client run typecheck",
     "test:unit": "node --import tsx --test tests/unit/*.test.mjs",
     "test:e2e": "node tests/e2e/run.mjs",
+    "test:ui": "playwright test",
     "test": "npm run typecheck && npm run test:unit"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "concurrently": "^9.1.2"
   }
 }

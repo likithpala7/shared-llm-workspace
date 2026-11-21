@@ -90,9 +90,50 @@ async function createOrStart(workspaceId: string): Promise<string> {
   });
 
   await container.start();
+  await verifyMount(workspaceId, hostPath);
   queries.setContainerId.run(container.id, workspaceId);
   console.log(`[docker] workspace ${workspaceId} -> container ${container.id.slice(0, 12)}`);
   return container.id;
+}
+
+/**
+ * Proves the workspace folder really is the same folder inside the container.
+ *
+ * If the Docker daemon cannot see the host path — a VM whose shared mounts do
+ * not cover it, say — Docker silently creates an empty directory on its own
+ * side instead. Everything then appears to work while terminals and the editor
+ * quietly edit two different copies. Better to fail here, loudly.
+ */
+async function verifyMount(workspaceId: string, hostPath: string): Promise<void> {
+  const sentinel = `.slw-mount-check-${Date.now()}`;
+  fs.writeFileSync(path.join(hostPath, sentinel), 'ok', 'utf8');
+  try {
+    const container = docker.getContainer(containerName(workspaceId));
+    const execution = await container.exec({
+      Cmd: ['/bin/sh', '-c', `cat /workspace/${sentinel}`],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+    const stream = await execution.start({ hijack: true, Tty: true });
+    let output = '';
+    await new Promise<void>((resolve) => {
+      stream.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
+      stream.on('end', resolve);
+      stream.on('close', resolve);
+      stream.on('error', () => resolve());
+    });
+
+    if (!output.includes('ok')) {
+      throw new Error(
+        `the workspace folder is not visible inside the container. ` +
+          `Docker cannot see ${hostPath} — if the daemon runs in a VM (Colima, ` +
+          `Docker Desktop), that path must be inside its shared mounts. Set ` +
+          `DATA_DIR to a shared location.`,
+      );
+    }
+  } finally {
+    fs.rmSync(path.join(hostPath, sentinel), { force: true });
+  }
 }
 
 export async function ensureContainer(workspaceId: string): Promise<string> {

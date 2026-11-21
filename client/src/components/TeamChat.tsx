@@ -18,9 +18,14 @@ export function TeamChat({
 }) {
   const [draft, setDraft] = useState('');
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
+  // Only follow new messages if you are already at the bottom.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
+    const list = listRef.current;
+    if (!list) return;
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (distanceFromBottom < 120) bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
 
   function submit(event: React.FormEvent) {
@@ -42,7 +47,7 @@ export function TeamChat({
         <span className="pane-meta">the agent never sees this</span>
       </header>
 
-      <div className="chat-messages">
+      <div className="chat-messages" ref={listRef}>
         {messages.length === 0 && (
           <p className="muted empty">Talk to the team here. The agent never sees this.</p>
         )}

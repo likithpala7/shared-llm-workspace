@@ -98,3 +98,22 @@ export async function waitFor(workspaceId, token, predicate, seconds = 120) {
 
 export const lastAnswer = (data) =>
   data.messages.filter((m) => m.kind === 'assistant').at(-1)?.content ?? '';
+
+/**
+ * Suites that assert what a model decided must not run against the stub. The
+ * stub echoes the request back, so a check like "the answer mentions ONE"
+ * passes without any model involved — a pass for the wrong reason, which is
+ * worse than an honest skip.
+ */
+export async function requireRealModel(suite) {
+  const health = await call('GET', '/api/health');
+  if (health.status !== 200) {
+    console.log(`SKIPPED  ${suite}: no server at ${API}`);
+    process.exit(99);
+  }
+  if (!health.body.usingRealModel) {
+    console.log(`SKIPPED  ${suite}: needs a real model, but the server is on ${health.body.provider}`);
+    console.log('         Set ANTHROPIC_API_KEY (and unset LLM_PROVIDER=stub) to run it.');
+    process.exit(99);
+  }
+}

@@ -97,6 +97,12 @@ npx playwright test tests/ui/layout.spec.mjs
 | `approvals` | a card appears for the person who did not ask, and either may decide it |
 | `terminal` | a shell runs a command and the result reaches the other person's tree |
 
+Suites that assert what a *model* decided (`02`, `03`, `05`, `07`) check
+`GET /api/health` first and skip themselves when the server is on the stub,
+rather than passing for the wrong reason — the stub echoes requests back, so a
+check like "the answer mentions ONE" would otherwise pass with no model
+involved.
+
 **Without a key**, the server falls back to its stub provider and the editor,
 security, resilience, load and browser suites all still pass — that is what CI
 runs on every push, so no API spend is needed to catch a regression.
@@ -117,7 +123,7 @@ workspaces in `data/` and stopped containers behind. Clean the containers with
 
 | Piece | Where |
 | --- | --- |
-| Express API, WebSocket upgrade routing | `server/src/index.ts` |
+| Express API, `/api/health`, WebSocket upgrade routing | `server/src/index.ts` |
 | Workspace events channel (file tree, members, AI thread) | `server/src/events.ts` |
 | AI thread: per-workspace FIFO queue and worker | `server/src/aiThread.ts` |
 | Agent tools: list, read, edit, create | `server/src/agentTools.ts` |

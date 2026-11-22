@@ -1,8 +1,11 @@
 // Milestone 2: two people send at once and get answers one after the other.
 import WebSocket from 'ws';
 import { WS_ORIGIN, call, lastAnswer, reporter, settle, sleep, thread, twoPeople } from './lib.mjs';
+import { requireRealModel } from './lib.mjs';
 
 const { check, finish } = reporter('thread');
+
+await requireRealModel('thread');
 const { workspaceId, alice, bob } = await twoPeople('E2E thread');
 
 const watch = (token) => {

@@ -16,6 +16,7 @@ import {
 } from './aiThread.js';
 import { decide, expirePendingOnStartup, listToolCalls } from './approvals.js';
 import { chatWss, listChat } from './chat.js';
+import { llm } from './llm.js';
 import { currentSummary, verbatimMessages, verbatimTokens } from './summaries.js';
 import { broadcast, eventsWss, onlineIn } from './events.js';
 import { terminalWss } from './terminals.js';
@@ -77,6 +78,23 @@ function cleanDisplayName(value: unknown): string | null {
   const name = value.trim().slice(0, 40);
   return name.length > 0 ? name : null;
 }
+
+const startedAt = Date.now();
+
+/**
+ * Unauthenticated, and deliberately boring: whether the server is up, and
+ * which model provider it would use. No key material, no counts, nothing a
+ * stranger could act on. Deploys watch this; tests read `provider` to refuse
+ * to run model-dependent checks against the stub.
+ */
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    provider: llm().name,
+    usingRealModel: !llm().name.startsWith('stub'),
+    uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+  });
+});
 
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);

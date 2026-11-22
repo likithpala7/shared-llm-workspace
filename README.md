@@ -164,6 +164,10 @@ What is **not** solved, and is not a configuration problem:
   a determined attacker. A kernel escape reaches the host.
 - **Containers have unrestricted network access.** Anything running in one can
   reach the internet and your local network.
+- **Everyone in a workspace shares its container.** Shells are separate, but
+  the PID namespace, network namespace, `/tmp` and resource caps are not — a
+  teammate can see and signal your processes, and one runaway build starves
+  the rest. Per-user containers are planned before strangers get a link.
 - **Rate limits are per-process and in memory.** They slow one abuser down;
   they do not stop a distributed one, and they reset on restart.
 - **Nothing reaps idle containers.** Twenty-two accumulated in a day of

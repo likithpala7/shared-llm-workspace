@@ -71,10 +71,42 @@ npm run test:e2e -- 04   # just the terminals suite
 | `07-summaries` | recall of who asked what, across merges |
 | `08-security` | path traversal, cross-workspace access, forged tokens, oversized input |
 | `09-resilience` | restarts: no duplication, queue resumes, nothing left pending |
+| `10-hardening` | WebSocket origin checks, cookie-only access, rate limits, an unprivileged sandbox |
 
-**Without a key**, the server falls back to its stub provider and suites 01, 08
-and 09 still pass — that is what CI runs on every push, so no API spend is
-needed to catch a regression in sync, auth or restart handling.
+**Load** — how it behaves with a crowd. Run against a stub-provider server so
+the shape is tested without spending.
+
+```bash
+EDITORS=50 EDITS=30 node tests/load/editors.mjs   # convergence under concurrency
+REQUESTS=20 node tests/load/queue.mjs             # FIFO under a pile-on
+TABS=40 node tests/load/sockets.mjs               # fan-out and presence
+```
+
+**Browser** — Playwright, driving two real browser contexts as two people.
+Every layout regression this project has had was visual, so these assert what
+a person can actually see and reach.
+
+```bash
+npm run test:ui
+npx playwright test tests/ui/layout.spec.mjs
+```
+
+| Spec | What it holds the line on |
+| --- | --- |
+| `layout` | the page never scrolls; every message stays reachable inside its pane; neither tab is a sliver |
+| `collaboration` | live typing, named remote cursors, file tree, presence, chat, unread badge |
+| `approvals` | a card appears for the person who did not ask, and either may decide it |
+| `terminal` | a shell runs a command and the result reaches the other person's tree |
+
+Suites that assert what a *model* decided (`02`, `03`, `05`, `07`) check
+`GET /api/health` first and skip themselves when the server is on the stub,
+rather than passing for the wrong reason — the stub echoes requests back, so a
+check like "the answer mentions ONE" would otherwise pass with no model
+involved.
+
+**Without a key**, the server falls back to its stub provider and the editor,
+security, resilience, load and browser suites all still pass — that is what CI
+runs on every push, so no API spend is needed to catch a regression.
 
 `07-summaries` is skipped by default: it needs a server started with a small
 budget so the rolling summary triggers in a handful of turns.
@@ -92,7 +124,7 @@ workspaces in `data/` and stopped containers behind. Clean the containers with
 
 | Piece | Where |
 | --- | --- |
-| Express API, WebSocket upgrade routing | `server/src/index.ts` |
+| Express API, `/api/health`, WebSocket upgrade routing | `server/src/index.ts` |
 | Workspace events channel (file tree, members, AI thread) | `server/src/events.ts` |
 | AI thread: per-workspace FIFO queue and worker | `server/src/aiThread.ts` |
 | Agent tools: list, read, edit, create | `server/src/agentTools.ts` |
@@ -116,6 +148,31 @@ workspaces in `data/` and stopped containers behind. Clean the containers with
 Workspace files live in `data/workspaces/<workspace id>/`; the SQLite database is
 `data/app.db`. Both are gitignored.
 
+## Before exposing this publicly
+
+Set `ALLOWED_ORIGINS`, `COOKIE_SECURE=true` and `TRUST_PROXY=true`. Without
+the first, only localhost may open a WebSocket, so a deployment will appear to
+load and then fail to sync.
+
+What is **not** solved, and is not a configuration problem:
+
+- **The invite link is the whole access-control model.** Anyone holding one can
+  read the code, open a shell and approve the agent's commands. There are no
+  roles, no revocation and no audit of who did what.
+- **A shell is remote code execution by design.** The container is unprivileged
+  and capped, but it is a normal Linux container, not a sandbox built to resist
+  a determined attacker. A kernel escape reaches the host.
+- **Containers have unrestricted network access.** Anything running in one can
+  reach the internet and your local network.
+- **Everyone in a workspace shares its container.** Shells are separate, but
+  the PID namespace, network namespace, `/tmp` and resource caps are not — a
+  teammate can see and signal your processes, and one runaway build starves
+  the rest. Per-user containers are planned before strangers get a link.
+- **Rate limits are per-process and in memory.** They slow one abuser down;
+  they do not stop a distributed one, and they reset on restart.
+- **Nothing reaps idle containers.** Twenty-two accumulated in a day of
+  testing, each holding a 1 GB reservation.
+
 ## Notes
 
 - Identity is a signed cookie, plus a copy in `sessionStorage` so two tabs of one
@@ -137,6 +194,10 @@ Workspace files live in `data/workspaces/<workspace id>/`; the SQLite database i
   asking. The system prompt explains that several people share the thread.
 - The queue lives in memory and is rebuilt from the database on startup, so a
   restart loses only the turn that was running.
+- Requests carry a prompt-cache breakpoint. Every step of a tool loop resends
+  the whole conversation plus the tool schemas, so input dominates the bill —
+  across one day of development it was 79% of spend. Cached reads cost about a
+  tenth of fresh ones. Watch the `[llm]` log lines for `cache_read=`.
 - The agent has four tools: `list_files`, `read_file`, `edit_file` and
   `create_file`. None needs approval; `run_command` does, and arrives in
   milestone 5.
@@ -150,8 +211,10 @@ Workspace files live in `data/workspaces/<workspace id>/`; the SQLite database i
 - Every tool call and its result is stored in the thread, so the whole team can
   see what the agent did, in order.
 - Each workspace gets one long-lived container (`slw-<workspace id>`, image
-  `node:22-alpine`, 1 GB / 2 CPUs) with its folder bind-mounted at
-  `/workspace`. Every person opens their own shell in it through `docker exec`,
+  `node:22-alpine`, 1 GB / 2 CPUs, 512 pids) with its folder bind-mounted at
+  `/workspace`. It runs as the host user, not root, with every capability
+  dropped and `no-new-privileges` set — a shell there cannot write outside
+  the workspace, mount anything, install packages or regain privilege. Every person opens their own shell in it through `docker exec`,
   so shell state is private but the filesystem is shared.
 - A chokidar watcher feeds changes made outside the editor — terminals,
   formatters, installs — into the open Yjs documents. It applies *what changed

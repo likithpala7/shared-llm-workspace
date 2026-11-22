@@ -13,8 +13,10 @@ import { workspaceDir } from './files.js';
  */
 
 const IMAGE = process.env.WORKSPACE_IMAGE ?? 'node:22-alpine';
-const MEMORY_BYTES = 1024 * 1024 * 1024; // 1 GB
-const CPU_NANOS = 2_000_000_000; // 2 CPUs
+const MEMORY_BYTES = Number(process.env.WORKSPACE_MEMORY_BYTES ?? 1024 * 1024 * 1024); // 1 GB
+const CPU_NANOS = Number(process.env.WORKSPACE_CPU_NANOS ?? 2_000_000_000); // 2 CPUs
+/** A fork bomb is the cheapest way to hurt a shared box. */
+const PIDS_LIMIT = Number(process.env.WORKSPACE_PIDS_LIMIT ?? 512);
 
 /** Docker Desktop, Colima and a custom DOCKER_SOCKET all land here. */
 function resolveSocket(): string {
@@ -72,6 +74,12 @@ async function createOrStart(workspaceId: string): Promise<string> {
   const hostPath = workspaceDir(workspaceId);
   fs.mkdirSync(hostPath, { recursive: true });
 
+  // Run as whoever owns the workspace folder on the host. Root inside the
+  // container would both be unnecessary privilege and would write files the
+  // host user cannot edit.
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : 1000;
+
   const container = await docker.createContainer({
     name,
     Image: IMAGE,
@@ -79,10 +87,25 @@ async function createOrStart(workspaceId: string): Promise<string> {
     Cmd: ['sleep', 'infinity'],
     WorkingDir: '/workspace',
     Tty: false,
+    User: `${uid}:${gid}`,
+    // A non-root uid has no home directory in the image.
+    Env: [
+      'HOME=/workspace',
+      'npm_config_cache=/workspace/.npm',
+      // Without this the prompt reads "~ $", because the home directory and
+      // the working directory are the same folder.
+      'PS1=/workspace \\$ ',
+    ],
     HostConfig: {
       Binds: [`${hostPath}:/workspace`],
       Memory: MEMORY_BYTES,
       NanoCpus: CPU_NANOS,
+      PidsLimit: PIDS_LIMIT,
+      // Nothing in a dev shell needs a capability; dropping them all removes
+      // most of what a container escape would reach for.
+      CapDrop: ['ALL'],
+      // Even a setuid binary cannot gain privileges from here.
+      SecurityOpt: ['no-new-privileges'],
       // Milestone 8 stops idle containers; nothing reaps them yet.
       RestartPolicy: { Name: 'no' },
     },
@@ -90,9 +113,50 @@ async function createOrStart(workspaceId: string): Promise<string> {
   });
 
   await container.start();
+  await verifyMount(workspaceId, hostPath);
   queries.setContainerId.run(container.id, workspaceId);
   console.log(`[docker] workspace ${workspaceId} -> container ${container.id.slice(0, 12)}`);
   return container.id;
+}
+
+/**
+ * Proves the workspace folder really is the same folder inside the container.
+ *
+ * If the Docker daemon cannot see the host path — a VM whose shared mounts do
+ * not cover it, say — Docker silently creates an empty directory on its own
+ * side instead. Everything then appears to work while terminals and the editor
+ * quietly edit two different copies. Better to fail here, loudly.
+ */
+async function verifyMount(workspaceId: string, hostPath: string): Promise<void> {
+  const sentinel = `.slw-mount-check-${Date.now()}`;
+  fs.writeFileSync(path.join(hostPath, sentinel), 'ok', 'utf8');
+  try {
+    const container = docker.getContainer(containerName(workspaceId));
+    const execution = await container.exec({
+      Cmd: ['/bin/sh', '-c', `cat /workspace/${sentinel}`],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+    const stream = await execution.start({ hijack: true, Tty: true });
+    let output = '';
+    await new Promise<void>((resolve) => {
+      stream.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
+      stream.on('end', resolve);
+      stream.on('close', resolve);
+      stream.on('error', () => resolve());
+    });
+
+    if (!output.includes('ok')) {
+      throw new Error(
+        `the workspace folder is not visible inside the container. ` +
+          `Docker cannot see ${hostPath} — if the daemon runs in a VM (Colima, ` +
+          `Docker Desktop), that path must be inside its shared mounts. Set ` +
+          `DATA_DIR to a shared location.`,
+      );
+    }
+  } finally {
+    fs.rmSync(path.join(hostPath, sentinel), { force: true });
+  }
 }
 
 export async function ensureContainer(workspaceId: string): Promise<string> {

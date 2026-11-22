@@ -62,10 +62,47 @@ function describeApiError(error: unknown): string {
 /** Stops a runaway loop; a turn that needs more steps than this is stuck. */
 const MAX_STEPS = 12;
 
+/**
+ * Builds one request. Pure, so the shape — particularly where the cache
+ * breakpoint lands — can be checked without spending anything.
+ *
+ * Caching matters more here than it looks. Every step of a tool loop resends
+ * the whole conversation plus the tool schemas, so input dominates the bill:
+ * across one day of development, input was 79% of spend. A cached read costs
+ * about a tenth of a fresh one.
+ *
+ * `cache_control` at the top level marks the last cacheable block, so the
+ * prefix — tools, system prompt, and everything said so far — is cached and
+ * the next step pays full price only for what was appended. Order matters and
+ * is fixed by the API: tools, then system, then messages.
+ */
+export function buildTurnRequest(turn: {
+  system: string;
+  tools: ToolDefinition[];
+  messages: Anthropic.MessageParam[];
+}): Anthropic.MessageStreamParams {
+  return {
+    model: MODEL,
+    max_tokens: 8000,
+    thinking: { type: 'adaptive' },
+    ...(EFFORT ? { output_config: { effort: EFFORT as 'low' | 'medium' | 'high' } } : {}),
+    // Cache the prefix; only the newly appended turn is billed in full.
+    cache_control: { type: 'ephemeral' },
+    system: turn.system,
+    tools: turn.tools,
+    messages: turn.messages,
+  };
+}
+
 class AnthropicClient implements LlmClient {
   readonly name = `anthropic:${MODEL}`;
   private readonly client = new Anthropic();
 
+  /**
+   * No cache breakpoint here: this runs once per summary with a short system
+   * prompt and a transcript that is different every time, so the prefix is
+   * below the minimum cacheable size and a marker would only add overhead.
+   */
   async complete(system: string, prompt: string): Promise<string> {
     const message = await this.client.messages.create({
       model: MODEL,
@@ -109,15 +146,9 @@ class AnthropicClient implements LlmClient {
         onText(text);
       };
 
-      const stream = this.client.messages.stream({
-        model: MODEL,
-        max_tokens: 8000,
-        thinking: { type: 'adaptive' },
-        ...(EFFORT ? { output_config: { effort: EFFORT as 'low' | 'medium' | 'high' } } : {}),
-        system,
-        tools,
-        messages: history,
-      });
+      const stream = this.client.messages.stream(
+        buildTurnRequest({ system, tools, messages: history }),
+      );
 
       const stop = () => stream.abort();
       signal.addEventListener('abort', stop, { once: true });
@@ -137,7 +168,8 @@ class AnthropicClient implements LlmClient {
       const usage = message.usage;
       console.log(
         `[llm] ${MODEL} step ${step + 1}: in=${usage.input_tokens} out=${usage.output_tokens}` +
-          (usage.cache_read_input_tokens ? ` cached=${usage.cache_read_input_tokens}` : ''),
+          (usage.cache_read_input_tokens ? ` cache_read=${usage.cache_read_input_tokens}` : '') +
+          (usage.cache_creation_input_tokens ? ` cache_write=${usage.cache_creation_input_tokens}` : ''),
       );
 
       answer += message.content
@@ -231,6 +263,17 @@ class StubClient implements LlmClient {
       return answer;
     }
 
+    // "run the command \"npm test\"" — so the approval path can be exercised
+    // without a key.
+    const commandMatch = /run (?:the )?command[:\s]+["'`]?([^"'`]+)["'`]?/i.exec(request);
+    if (commandMatch) {
+      const command = commandMatch[1].trim();
+      await emit(`${who}, I will run \`${command}\` once someone approves it.`);
+      const outcome = await useTool('run_command', { command });
+      await emit(outcome.isError ? `It did not run: ${outcome.output}` : `Done:\n${outcome.output}`);
+      return answer;
+    }
+
     // "append a line to notes.md saying ..."
     if (/\b(append|add)\b/i.test(request) && fileMatch) {
       const path = fileMatch[1];
@@ -254,7 +297,8 @@ class StubClient implements LlmClient {
       return answer;
     }
 
-    await emit(`${who}, here is what the workspace holds.`);
+    await emit(`${who}, you asked: "${request.slice(0, 200)}".`);
+    await emit('Here is what the workspace holds:');
     const listing = await useTool('list_files', {});
     await emit(listing.output.split('\n').join(', '));
     await emit('(No ANTHROPIC_API_KEY is set, so this is the stub provider, not the model.)');

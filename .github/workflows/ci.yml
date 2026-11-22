@@ -34,6 +34,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Built before the server starts: the server only serves client/dist if
+      # it exists at startup. The browser tests then exercise the built bundle
+      # rather than a dev server that re-optimises mid-run.
+      - name: Build the client
+        run: npm run build
+
       - name: Unit tests
         run: npm run test:unit
 
@@ -56,3 +62,40 @@ jobs:
           node tests/e2e/01-editor.mjs
           node tests/e2e/08-security.mjs
           node tests/e2e/09-resilience.mjs
+
+      # Its own server: the rate limits have to be small enough to trip in a
+      # few requests, which would break every other suite on a shared one.
+      - name: Hardening suite
+        run: |
+          PORT=3150 LIMIT_AI_REQUESTS=5 COOKIE_SECRET=ci-only-secret \
+            npx tsx server/src/index.ts &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3150/api/health && break
+            sleep 1
+          done
+          TEST_API=http://localhost:3150 node tests/e2e/10-hardening.mjs
+
+      - name: Load suites
+        run: |
+          node tests/load/sockets.mjs
+          node tests/load/queue.mjs
+        env:
+          TABS: 25
+          REQUESTS: 10
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # The terminal spec needs a Docker daemon with the workspace folder in
+      # its shared mounts; on a runner the daemon is local, so it does.
+      - name: Browser tests
+        run: npx playwright test
+        env:
+          TEST_URL: http://localhost:3001
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces-node-${{ matrix.node }}
+          path: test-results/
+          retention-days: 7

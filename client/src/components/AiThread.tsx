@@ -40,10 +40,16 @@ export function AiThread({
   >(null);
   const [showMemory, setShowMemory] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  // Follow the stream as it arrives.
+  // Follow the stream as it arrives — but only for someone who is already at
+  // the bottom. Scrolling up to read an earlier turn should not be undone by
+  // the next token arriving.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
+    const list = listRef.current;
+    if (!list) return;
+    const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (distanceFromBottom < 120) bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
 
   const queued = messages.filter((m) => m.kind === 'request' && m.status === 'queued');
@@ -110,7 +116,7 @@ export function AiThread({
         </div>
       )}
 
-      <div className="thread-messages">
+      <div className="thread-messages" ref={listRef}>
         {messages.length === 0 && (
           <p className="muted empty">
             Nothing yet. Every message here is a request to the agent — use team chat for

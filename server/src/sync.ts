@@ -3,7 +3,7 @@ import path from 'node:path';
 import { Hocuspocus } from '@hocuspocus/server';
 import * as Y from 'yjs';
 import { YJS_STATE_DIR } from './config.js';
-import { userFromHeaders, verifyToken } from './auth.js';
+import { verifyToken } from './auth.js';
 import { queries } from './db.js';
 import { isEditable, readFileText, resolveInWorkspace, writeFileTextIfChanged } from './files.js';
 
@@ -59,12 +59,14 @@ export const hocuspocus = new Hocuspocus({
   maxDebounce: 3000,
   quiet: true,
 
-  async onAuthenticate({ token, requestHeaders, documentName }) {
+  async onAuthenticate({ token, documentName }) {
     const { workspaceId, relPath } = parseDocumentName(documentName);
 
-    // The provider sends a per-tab token; fall back to the session cookie.
+    // An explicit token only — never the cookie. A cookie is sent by the
+    // browser on any cross-site WebSocket too, so accepting one here would let
+    // another site open a socket as the visitor and read their files.
     const userId = verifyToken(token);
-    const user = userId ? queries.getUser.get(userId) : userFromHeaders(requestHeaders);
+    const user = userId ? queries.getUser.get(userId) : null;
     if (!user) throw new Error('not signed in');
     if (!queries.getMembership.get(user.id, workspaceId)) throw new Error('not a member');
 

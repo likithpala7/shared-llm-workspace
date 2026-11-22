@@ -1,4 +1,5 @@
-const API = process.env.TEST_API ?? 'http://localhost:3006';
+import { API, requireRealModel } from './lib.mjs';
+// Point TEST_API at a server started with a small SUMMARY_TOKEN_BUDGET.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const check = (l, ok, e = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${l}${e ? ` — ${e}` : ''}`); if (!ok) failures++; };
@@ -6,6 +7,8 @@ const call = async (m, u, b, t) => {
   const res = await fetch(API + u, { method: m, headers: { ...(b ? { 'Content-Type': 'application/json' } : {}), ...(t ? { Authorization: `Bearer ${t}` } : {}) }, body: b ? JSON.stringify(b) : undefined });
   const x = await res.text(); return { status: res.status, body: x ? JSON.parse(x) : null };
 };
+
+await requireRealModel('summaries');
 const thread = async (id, t) => (await call('GET', `/api/workspaces/${id}/ai`, null, t)).body;
 const ask = async (id, t, content) => {
   await call('POST', `/api/workspaces/${id}/ai`, { content }, t);

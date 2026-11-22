@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import * as cookieLib from 'cookie';
 import type { Request, Response } from 'express';
-import { COOKIE_NAME, COOKIE_SECRET } from './config.js';
+import { COOKIE_NAME, COOKIE_SECRET, COOKIE_SECURE } from './config.js';
 import { queries, type User } from './db.js';
 
 /**
@@ -56,6 +56,7 @@ export function setSessionCookie(res: Response, userId: string): void {
     cookieLib.serialize(COOKIE_NAME, signToken(userId), {
       httpOnly: true,
       sameSite: 'lax',
+      secure: COOKIE_SECURE,
       path: '/',
       maxAge: 60 * 60 * 24 * 365,
     }),

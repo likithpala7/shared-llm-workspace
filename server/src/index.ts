@@ -5,7 +5,7 @@ import path from 'node:path';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { can, currentUser, setSessionCookie, signToken } from './auth.js';
-import { PORT, REPO_ROOT, WORKSPACES_DIR } from './config.js';
+import { PORT, REPO_ROOT, WORKSPACES_DIR, isAllowedOrigin } from './config.js';
 import { queries } from './db.js';
 import {
   cancelRequest,
@@ -16,6 +16,8 @@ import {
 } from './aiThread.js';
 import { decide, expirePendingOnStartup, listToolCalls } from './approvals.js';
 import { chatWss, listChat } from './chat.js';
+import { llm } from './llm.js';
+import { LIMITS, allow, retryAfterSeconds } from './rateLimit.js';
 import { currentSummary, verbatimMessages, verbatimTokens } from './summaries.js';
 import { broadcast, eventsWss, onlineIn } from './events.js';
 import { terminalWss } from './terminals.js';
@@ -26,9 +28,31 @@ import { hocuspocus } from './sync.js';
 fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
 
 const app = express();
+// Behind a reverse proxy, req.ip must come from X-Forwarded-For or every
+// caller looks like the proxy and shares one rate-limit bucket.
+app.set('trust proxy', process.env.TRUST_PROXY === 'true');
 // Large enough for a long request or a file the agent writes, small enough
 // that nobody can post a gigabyte at us.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY'); // no embedding, so no clickjacking
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
 app.use(express.json({ limit: '1mb' }));
+
+/** Refuses a caller who is over their allowance, with a Retry-After. */
+function overLimit(
+  res: express.Response,
+  key: string,
+  limit: { max: number; windowMs: number },
+): boolean {
+  if (allow(key, limit.max, limit.windowMs)) return false;
+  res.setHeader('Retry-After', String(retryAfterSeconds(key)));
+  res.status(429).json({ error: 'too many requests; slow down' });
+  return true;
+}
 
 /**
  * Body-parser failures land here. Without this, Express answers with an HTML
@@ -78,6 +102,23 @@ function cleanDisplayName(value: unknown): string | null {
   return name.length > 0 ? name : null;
 }
 
+const startedAt = Date.now();
+
+/**
+ * Unauthenticated, and deliberately boring: whether the server is up, and
+ * which model provider it would use. No key material, no counts, nothing a
+ * stranger could act on. Deploys watch this; tests read `provider` to refuse
+ * to run model-dependent checks against the stub.
+ */
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    provider: llm().name,
+    usingRealModel: !llm().name.startsWith('stub'),
+    uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
+  });
+});
+
 app.get('/api/me', (req, res) => {
   const user = currentUser(req);
   if (!user) return res.status(401).json({ error: 'not signed in' });
@@ -87,6 +128,7 @@ app.get('/api/me', (req, res) => {
 
 /** Create a workspace and join it as owner. */
 app.post('/api/workspaces', (req, res) => {
+  if (overLimit(res, `create:${req.ip}`, LIMITS.createWorkspace)) return;
   const displayName = cleanDisplayName(req.body?.displayName);
   if (!displayName) return res.status(400).json({ error: 'displayName is required' });
   const name = cleanDisplayName(req.body?.name) ?? 'Workspace';
@@ -115,6 +157,7 @@ app.get('/api/invites/:token', (req, res) => {
 
 /** Join by invite link with a display name. */
 app.post('/api/invites/:token/join', (req, res) => {
+  if (overLimit(res, `join:${req.ip}`, LIMITS.join)) return;
   const workspace = queries.getWorkspaceByToken.get(req.params.token);
   if (!workspace) return res.status(404).json({ error: 'invite not found' });
 
@@ -211,6 +254,8 @@ app.post('/api/workspaces/:id/ai', (req, res) => {
   if (content.length > 20_000) {
     return res.status(400).json({ error: 'request is too long (20,000 characters max)' });
   }
+  // The only endpoint that spends money.
+  if (overLimit(res, `ai:${user!.id}`, LIMITS.aiRequest)) return;
   res.json({ message: enqueueRequest(req.params.id, user!.id, content) });
 });
 
@@ -289,6 +334,14 @@ syncWss.on('connection', (socket, request) => {
 });
 
 server.on('upgrade', (request, socket, head) => {
+  // Same-origin policy does not cover WebSockets: without this, any page the
+  // visitor opens could connect here carrying their cookies.
+  if (!isAllowedOrigin(request.headers.origin)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+
   const { pathname } = new URL(request.url ?? '/', 'http://localhost');
   const wss = pathname === '/sync' || pathname.startsWith('/sync/')
     ? syncWss

@@ -4,8 +4,11 @@ import * as Y from 'yjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { WS_ORIGIN, ask, call, lastAnswer, reporter, sleep, twoPeople } from './lib.mjs';
+import { requireRealModel } from './lib.mjs';
 
 const { check, finish } = reporter('tools');
+
+await requireRealModel('tools');
 const { workspaceId, alice, bob } = await twoPeople('E2E tools');
 const filePath = (name) => path.join(process.cwd(), 'data', 'workspaces', workspaceId, name);
 

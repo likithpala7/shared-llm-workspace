@@ -26,7 +26,9 @@ function loadEnvFile(): void {
 loadEnvFile();
 
 export const PORT = Number(process.env.PORT ?? 3001);
-export const DATA_DIR = process.env.DATA_DIR ?? path.join(REPO_ROOT, 'data');
+// Resolved: Docker refuses a relative bind path, so a relative DATA_DIR
+// would break terminals with a cryptic error far from the cause.
+export const DATA_DIR = path.resolve(process.env.DATA_DIR ?? path.join(REPO_ROOT, 'data'));
 export const WORKSPACES_DIR = path.join(DATA_DIR, 'workspaces');
 export const DB_PATH = path.join(DATA_DIR, 'app.db');
 
@@ -37,6 +39,27 @@ export const DB_PATH = path.join(DATA_DIR, 'app.db');
  * tabs are still holding.
  */
 export const YJS_STATE_DIR = path.join(DATA_DIR, 'yjs');
+
+/**
+ * Browsers do not apply same-origin policy to WebSockets, so an upgrade must
+ * be checked by hand or any site can open one with the visitor's cookies
+ * attached. Non-browser clients send no Origin at all and are allowed through
+ * — they have no ambient credentials to borrow.
+ */
+export const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+/** Localhost is trusted in development when nothing is configured. */
+export function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true; // not a browser
+  if (ALLOWED_ORIGINS.length > 0) return ALLOWED_ORIGINS.includes(origin);
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin);
+}
+
+/** Set behind TLS so the session cookie never travels in the clear. */
+export const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true';
 
 export const COOKIE_NAME = 'slw_session';
 export const COOKIE_SECRET = process.env.COOKIE_SECRET ?? 'dev-only-insecure-secret';

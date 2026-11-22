@@ -1,8 +1,11 @@
 // Milestone 5: the agent asks, either person approves, both see the output.
 import WebSocket from 'ws';
 import { WS_ORIGIN, call, lastAnswer, reporter, settle, sleep, thread, twoPeople, waitFor } from './lib.mjs';
+import { requireRealModel } from './lib.mjs';
 
 const { check, finish } = reporter('approvals');
+
+await requireRealModel('approvals');
 const { workspaceId, alice, bob } = await twoPeople('E2E approvals');
 
 const events = [];

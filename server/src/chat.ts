@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { verifyToken } from './auth.js';
 import { queries, type TeamMessage } from './db.js';
+import { LIMITS, allow } from './rateLimit.js';
 
 /**
  * Team chat, on its own WebSocket channel.
@@ -75,6 +76,7 @@ chatWss.on('connection', (socket: WebSocket, _request: IncomingMessage) => {
     if (message.type === 'say' && client) {
       const content = typeof message.content === 'string' ? message.content.trim() : '';
       if (!content) return;
+      if (!allow(`chat:${client.userId}`, LIMITS.chat.max, LIMITS.chat.windowMs)) return;
 
       const id = crypto.randomBytes(8).toString('hex');
       queries.insertTeamMessage.run(

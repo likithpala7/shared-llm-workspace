@@ -34,6 +34,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Built before the server starts: the server only serves client/dist if
+      # it exists at startup. The browser tests then exercise the built bundle
+      # rather than a dev server that re-optimises mid-run.
+      - name: Build the client
+        run: npm run build
+
       - name: Unit tests
         run: npm run test:unit
 
@@ -68,18 +74,12 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Start the client
-        run: |
-          npm run dev:client &
-          for i in $(seq 1 60); do
-            curl -sf -o /dev/null http://localhost:5173 && break
-            sleep 1
-          done
-
       # The terminal spec needs a Docker daemon with the workspace folder in
       # its shared mounts; on a runner the daemon is local, so it does.
       - name: Browser tests
         run: npx playwright test
+        env:
+          TEST_URL: http://localhost:3001
 
       - uses: actions/upload-artifact@v4
         if: failure()

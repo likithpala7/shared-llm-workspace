@@ -15,7 +15,11 @@ export async function createWorkspace(name) {
 /** Opens a page as a named person, joining through the invite link. */
 export async function joinAs(page, inviteToken, displayName) {
   await page.goto(`/join/${inviteToken}`);
-  await page.getByPlaceholder('e.g. Bob').fill(displayName);
+  // A cold first load can be slow; wait for the form rather than letting the
+  // whole test budget drain on the default timeout.
+  const name = page.getByPlaceholder('e.g. Bob');
+  await name.waitFor({ state: 'visible', timeout: 30_000 });
+  await name.fill(displayName);
   await page.getByRole('button', { name: 'Join workspace' }).click();
   await page.waitForURL(/\/w\//);
   await page.locator('.editor-host').waitFor();

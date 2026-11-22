@@ -56,12 +56,14 @@ jobs:
           done
         env:
           COOKIE_SECRET: ci-only-secret
+          LIMIT_AI_REQUESTS: 5
 
       - name: Editor, security and resilience suites
         run: |
           node tests/e2e/01-editor.mjs
           node tests/e2e/08-security.mjs
           node tests/e2e/09-resilience.mjs
+          LIMIT_AI_REQUESTS=5 node tests/e2e/10-hardening.mjs
 
       - name: Load suites
         run: |

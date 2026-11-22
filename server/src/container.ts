@@ -13,8 +13,10 @@ import { workspaceDir } from './files.js';
  */
 
 const IMAGE = process.env.WORKSPACE_IMAGE ?? 'node:22-alpine';
-const MEMORY_BYTES = 1024 * 1024 * 1024; // 1 GB
-const CPU_NANOS = 2_000_000_000; // 2 CPUs
+const MEMORY_BYTES = Number(process.env.WORKSPACE_MEMORY_BYTES ?? 1024 * 1024 * 1024); // 1 GB
+const CPU_NANOS = Number(process.env.WORKSPACE_CPU_NANOS ?? 2_000_000_000); // 2 CPUs
+/** A fork bomb is the cheapest way to hurt a shared box. */
+const PIDS_LIMIT = Number(process.env.WORKSPACE_PIDS_LIMIT ?? 512);
 
 /** Docker Desktop, Colima and a custom DOCKER_SOCKET all land here. */
 function resolveSocket(): string {
@@ -72,6 +74,12 @@ async function createOrStart(workspaceId: string): Promise<string> {
   const hostPath = workspaceDir(workspaceId);
   fs.mkdirSync(hostPath, { recursive: true });
 
+  // Run as whoever owns the workspace folder on the host. Root inside the
+  // container would both be unnecessary privilege and would write files the
+  // host user cannot edit.
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 1000;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : 1000;
+
   const container = await docker.createContainer({
     name,
     Image: IMAGE,
@@ -79,10 +87,19 @@ async function createOrStart(workspaceId: string): Promise<string> {
     Cmd: ['sleep', 'infinity'],
     WorkingDir: '/workspace',
     Tty: false,
+    User: `${uid}:${gid}`,
+    // A non-root uid has no home directory in the image.
+    Env: ['HOME=/workspace', 'npm_config_cache=/workspace/.npm'],
     HostConfig: {
       Binds: [`${hostPath}:/workspace`],
       Memory: MEMORY_BYTES,
       NanoCpus: CPU_NANOS,
+      PidsLimit: PIDS_LIMIT,
+      // Nothing in a dev shell needs a capability; dropping them all removes
+      // most of what a container escape would reach for.
+      CapDrop: ['ALL'],
+      // Even a setuid binary cannot gain privileges from here.
+      SecurityOpt: ['no-new-privileges'],
       // Milestone 8 stops idle containers; nothing reaps them yet.
       RestartPolicy: { Name: 'no' },
     },

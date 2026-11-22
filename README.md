@@ -71,6 +71,7 @@ npm run test:e2e -- 04   # just the terminals suite
 | `07-summaries` | recall of who asked what, across merges |
 | `08-security` | path traversal, cross-workspace access, forged tokens, oversized input |
 | `09-resilience` | restarts: no duplication, queue resumes, nothing left pending |
+| `10-hardening` | WebSocket origin checks, cookie-only access, rate limits, an unprivileged sandbox |
 
 **Load** — how it behaves with a crowd. Run against a stub-provider server so
 the shape is tested without spending.
@@ -147,6 +148,27 @@ workspaces in `data/` and stopped containers behind. Clean the containers with
 Workspace files live in `data/workspaces/<workspace id>/`; the SQLite database is
 `data/app.db`. Both are gitignored.
 
+## Before exposing this publicly
+
+Set `ALLOWED_ORIGINS`, `COOKIE_SECURE=true` and `TRUST_PROXY=true`. Without
+the first, only localhost may open a WebSocket, so a deployment will appear to
+load and then fail to sync.
+
+What is **not** solved, and is not a configuration problem:
+
+- **The invite link is the whole access-control model.** Anyone holding one can
+  read the code, open a shell and approve the agent's commands. There are no
+  roles, no revocation and no audit of who did what.
+- **A shell is remote code execution by design.** The container is unprivileged
+  and capped, but it is a normal Linux container, not a sandbox built to resist
+  a determined attacker. A kernel escape reaches the host.
+- **Containers have unrestricted network access.** Anything running in one can
+  reach the internet and your local network.
+- **Rate limits are per-process and in memory.** They slow one abuser down;
+  they do not stop a distributed one, and they reset on restart.
+- **Nothing reaps idle containers.** Twenty-two accumulated in a day of
+  testing, each holding a 1 GB reservation.
+
 ## Notes
 
 - Identity is a signed cookie, plus a copy in `sessionStorage` so two tabs of one
@@ -185,8 +207,10 @@ Workspace files live in `data/workspaces/<workspace id>/`; the SQLite database i
 - Every tool call and its result is stored in the thread, so the whole team can
   see what the agent did, in order.
 - Each workspace gets one long-lived container (`slw-<workspace id>`, image
-  `node:22-alpine`, 1 GB / 2 CPUs) with its folder bind-mounted at
-  `/workspace`. Every person opens their own shell in it through `docker exec`,
+  `node:22-alpine`, 1 GB / 2 CPUs, 512 pids) with its folder bind-mounted at
+  `/workspace`. It runs as the host user, not root, with every capability
+  dropped and `no-new-privileges` set — a shell there cannot write outside
+  the workspace, mount anything, install packages or regain privilege. Every person opens their own shell in it through `docker exec`,
   so shell state is private but the filesystem is shared.
 - A chokidar watcher feeds changes made outside the editor — terminals,
   formatters, installs — into the open Yjs documents. It applies *what changed

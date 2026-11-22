@@ -3,6 +3,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { verifyToken } from './auth.js';
 import { openShell } from './container.js';
 import { queries } from './db.js';
+import { LIMITS, allow } from './rateLimit.js';
 import { startWatching } from './watcher.js';
 
 /**
@@ -40,6 +41,12 @@ terminalWss.on('connection', (socket: WebSocket, _request: IncomingMessage) => {
       if (!userId || !queries.getMembership.get(userId, message.workspaceId)) {
         send({ type: 'error', message: 'not a member of this workspace' });
         socket.close(1008, 'not a member');
+        return;
+      }
+
+      if (!allow(`terminal:${userId}`, LIMITS.terminal.max, LIMITS.terminal.windowMs)) {
+        send({ type: 'error', message: 'too many shells started recently; wait a moment' });
+        socket.close(1008, 'rate limited');
         return;
       }
 

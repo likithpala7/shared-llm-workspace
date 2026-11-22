@@ -168,6 +168,10 @@ Workspace files live in `data/workspaces/<workspace id>/`; the SQLite database i
   asking. The system prompt explains that several people share the thread.
 - The queue lives in memory and is rebuilt from the database on startup, so a
   restart loses only the turn that was running.
+- Requests carry a prompt-cache breakpoint. Every step of a tool loop resends
+  the whole conversation plus the tool schemas, so input dominates the bill —
+  across one day of development it was 79% of spend. Cached reads cost about a
+  tenth of fresh ones. Watch the `[llm]` log lines for `cache_read=`.
 - The agent has four tools: `list_files`, `read_file`, `edit_file` and
   `create_file`. None needs approval; `run_command` does, and arrives in
   milestone 5.

@@ -1,0 +1,26 @@
+# /etc/caddy/Caddyfile
+#
+# Caddy is the whole ingress layer: it gets certificates by itself and passes
+# WebSocket upgrades through untouched, which all four channels depend on
+# (/sync, /events, /terminal, /chat).
+workspace.example.com {
+	encode zstd gzip
+
+	# Terminals and editors hold sockets open for hours.
+	reverse_proxy 127.0.0.1:3001 {
+		transport http {
+			read_timeout 24h
+			write_timeout 24h
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/slw.log
+		format json
+	}
+}

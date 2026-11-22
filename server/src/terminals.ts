@@ -1,7 +1,7 @@
 import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { verifyToken } from './auth.js';
-import { openShell } from './container.js';
+import { openShell, shellClosed, shellOpened } from './container.js';
 import { queries } from './db.js';
 import { LIMITS, allow } from './rateLimit.js';
 import { startWatching } from './watcher.js';
@@ -20,6 +20,7 @@ type Incoming =
 terminalWss.on('connection', (socket: WebSocket, _request: IncomingMessage) => {
   let shell: Awaited<ReturnType<typeof openShell>> | null = null;
   let starting = false;
+  let attachedTo: string | null = null;
 
   const send = (message: unknown) => {
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(message));
@@ -64,6 +65,9 @@ terminalWss.on('connection', (socket: WebSocket, _request: IncomingMessage) => {
         starting = false;
       }
 
+      shellOpened(message.workspaceId);
+      attachedTo = message.workspaceId;
+
       // A terminal is the main way files change behind Yjs's back.
       startWatching(message.workspaceId);
 
@@ -84,5 +88,9 @@ terminalWss.on('connection', (socket: WebSocket, _request: IncomingMessage) => {
   socket.on('close', () => {
     shell?.kill();
     shell = null;
+    if (attachedTo) {
+      shellClosed(attachedTo);
+      attachedTo = null;
+    }
   });
 });

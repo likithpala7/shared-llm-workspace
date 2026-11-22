@@ -16,6 +16,8 @@ import {
 } from './aiThread.js';
 import { decide, expirePendingOnStartup, listToolCalls } from './approvals.js';
 import { chatWss, listChat } from './chat.js';
+import { startReaper } from './container.js';
+import { preflight } from './preflight.js';
 import { llm } from './llm.js';
 import { LIMITS, allow, retryAfterSeconds } from './rateLimit.js';
 import { currentSummary, verbatimMessages, verbatimTokens } from './summaries.js';
@@ -26,6 +28,8 @@ import { createEmptyFile, listTree, seedWorkspace } from './files.js';
 import { hocuspocus } from './sync.js';
 
 fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
+
+preflight();
 
 const app = express();
 // Behind a reverse proxy, req.ip must come from X-Forwarded-For or every
@@ -365,4 +369,5 @@ server.listen(PORT, () => {
   console.log(`server listening on http://localhost:${PORT}`);
   expirePendingOnStartup();
   resumeQueuesOnStartup();
+  startReaper();
 });

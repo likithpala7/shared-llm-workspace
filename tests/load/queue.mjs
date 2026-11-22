@@ -19,8 +19,13 @@ const submitted = await Promise.all(
       i % 2 === 0 ? alice.token : bob.token),
   ),
 );
-check('every request was accepted', submitted.every((r) => r.status === 200),
-  `${submitted.filter((r) => r.status === 200).length}/${REQUESTS}`);
+const refused = submitted.filter((r) => r.status !== 200);
+check('every request was accepted', refused.length === 0,
+  refused.length === 0
+    ? `${REQUESTS}/${REQUESTS}`
+    : `${refused.length} refused, first was ${refused[0].status}: ${refused[0].body?.error ?? ''}` +
+      (refused[0].status === 429 ? ' — raise LIMIT_AI_REQUESTS for this run' : ''));
+if (refused.length > 0) finish();
 
 const ids = submitted.map((r) => r.body.message.id);
 check('every request got its own id', new Set(ids).size === REQUESTS);

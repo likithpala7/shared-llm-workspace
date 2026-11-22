@@ -154,6 +154,20 @@ single permission check, with a `role` column stored and ignored. Make
 
 Also worth doing here: rate-limit workspace creation, and log who ran what.
 
+### Terminal isolation (decided 2026-11-22)
+
+Today every member of a workspace shares one container, as `SPEC.md` locks:
+separate shells, but one PID namespace, one network namespace, one `/tmp`, and
+one set of resource caps. Teammates can see and signal each other's processes,
+and one runaway build starves the others in that workspace.
+
+That is acceptable for people who already trust each other — the invite link
+assumes as much. Before strangers get a link, move to one container per user
+per workspace (`slw-<workspace>-<user>`), still bind-mounting the same
+`/workspace` folder so collaboration is unchanged. The cost is memory: the
+1 GB reservation becomes per concurrent *person* rather than per workspace,
+which makes the idle reaper a hard requirement rather than good housekeeping.
+
 ## Phase 3 — only when something actually hurts
 
 Deliberately deferred; none of it is needed for a small team.

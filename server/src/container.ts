@@ -89,7 +89,13 @@ async function createOrStart(workspaceId: string): Promise<string> {
     Tty: false,
     User: `${uid}:${gid}`,
     // A non-root uid has no home directory in the image.
-    Env: ['HOME=/workspace', 'npm_config_cache=/workspace/.npm'],
+    Env: [
+      'HOME=/workspace',
+      'npm_config_cache=/workspace/.npm',
+      // Without this the prompt reads "~ $", because the home directory and
+      // the working directory are the same folder.
+      'PS1=/workspace \\$ ',
+    ],
     HostConfig: {
       Binds: [`${hostPath}:/workspace`],
       Memory: MEMORY_BYTES,

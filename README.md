@@ -37,6 +37,13 @@ Without one, the server logs `LLM provider: stub` and the agent replies with a
 canned message. The queue, attribution, streaming, cancel and Stop all work
 either way.
 
+## Deploying
+
+See [deploy/README.md](deploy/README.md) for the runbook, and
+[DEPLOY.md](DEPLOY.md) for why it is shaped that way. In short: one VM, Caddy
+in front for TLS, the server under systemd on the host (it needs the Docker
+socket), workspace data on disk and backed up nightly.
+
 ## Tests
 
 Three tiers, cheapest first.
@@ -72,6 +79,7 @@ npm run test:e2e -- 04   # just the terminals suite
 | `08-security` | path traversal, cross-workspace access, forged tokens, oversized input |
 | `09-resilience` | restarts: no duplication, queue resumes, nothing left pending |
 | `10-hardening` | WebSocket origin checks, cookie-only access, rate limits, an unprivileged sandbox |
+| `11-reaper` | idle containers stopped, attached shells spared, restarted on demand |
 
 **Load** — how it behaves with a crowd. Run against a stub-provider server so
 the shape is tested without spending.

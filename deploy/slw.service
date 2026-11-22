@@ -1,0 +1,37 @@
+# /etc/systemd/system/slw.service
+#
+# The server runs on the host, not in a container: it needs the Docker socket
+# (mounting that into a container is root-equivalent) and it bind-mounts
+# workspace folders by host path.
+[Unit]
+Description=Shared LLM workspace
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=slw
+Group=docker
+WorkingDirectory=/srv/slw
+EnvironmentFile=/srv/slw/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node server/dist/index.js
+Restart=always
+RestartSec=5
+
+# The server only ever needs its own tree and the Docker socket.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/slw/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=slw
+
+[Install]
+WantedBy=multi-user.target

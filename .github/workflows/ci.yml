@@ -75,6 +75,17 @@ jobs:
           done
           TEST_API=http://localhost:3150 node tests/e2e/10-hardening.mjs
 
+      # Short idle window so the reaper acts within the test.
+      - name: Reaper suite
+        run: |
+          PORT=3160 IDLE_CONTAINER_MINUTES=0.15 REAP_INTERVAL_MS=2000 \
+            COOKIE_SECRET=ci-only-secret npx tsx server/src/index.ts &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://localhost:3160/api/health && break
+            sleep 1
+          done
+          TEST_API=http://localhost:3160 node tests/e2e/11-reaper.mjs
+
       - name: Load suites
         run: |
           node tests/load/sockets.mjs

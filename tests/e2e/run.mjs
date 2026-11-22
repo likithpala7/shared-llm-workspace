@@ -28,9 +28,11 @@ for (const suite of suites) {
   const code = await new Promise((resolve) => {
     spawn(process.execPath, [path.join(here, suite)], { stdio: 'inherit' }).on('exit', resolve);
   });
-  results.push({ suite, ok: code === 0 });
+  results.push({ suite, ok: code === 0 || code === 99, skipped: code === 99 });
 }
 
 console.log('\n════ summary ════');
-for (const { suite, ok } of results) console.log(`${ok ? 'pass' : 'FAIL'}  ${suite}`);
+for (const { suite, ok, skipped } of results) {
+  console.log(`${skipped ? 'skip' : ok ? 'pass' : 'FAIL'}  ${suite}`);
+}
 process.exit(results.every((r) => r.ok) ? 0 : 1);

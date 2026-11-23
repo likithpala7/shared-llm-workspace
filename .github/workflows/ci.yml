@@ -57,9 +57,10 @@ jobs:
         env:
           COOKIE_SECRET: ci-only-secret
 
-      - name: Editor, security and resilience suites
+      - name: Editor, chat, security and resilience suites
         run: |
           node tests/e2e/01-editor.mjs
+          node tests/e2e/06-chat.mjs
           node tests/e2e/08-security.mjs
           node tests/e2e/09-resilience.mjs
 

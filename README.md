@@ -1,9 +1,90 @@
 # Shared LLM Workspace
 
-Implementation of [SPEC.md](SPEC.md). **Milestones 1–6 are done** — shared
-editor, AI thread with queue, agent file tools, sandbox and personal terminals,
-commands with approval, and team chat with presence. Milestones 7 and 8 are not
-started.
+**A collaborative code workspace where an AI agent is a participant, not a sidebar.**
+Several people edit the same files in real time, share one conversation with the
+agent, and approve the commands it wants to run — each workspace in its own
+Docker container.
+
+![Two people and an agent working in one workspace](docs/media/demo.gif)
+
+*Bob adds a discount branch while Alice watches it appear. Alice asks the agent
+to cover it with a test; the agent reads the project, writes the test, and asks
+permission before running anything. Alice approves, and both see the output.*
+
+## What makes it interesting
+
+**The agent edits files people are typing in.** Not a chat window that emits
+patches — the agent's edits land in the same CRDT documents as human keystrokes,
+live. The hard part isn't the editing, it's that a terminal, a formatter and a
+person can all change one file at once. The merge logic that stops anyone's
+keystrokes being eaten is in [`textMerge.ts`](server/src/textMerge.ts), with a
+[randomised property test](tests/unit/textMerge.test.mjs) that interleaves typing
+with disk rewrites 200 times and asserts nothing is lost or duplicated. It found
+a real data-loss bug on its first run.
+
+**One conversation, many people.** Requests queue in arrival order and run one at
+a time, each tagged with who asked. The model is told who is speaking, so "make
+it blue" from Bob isn't answered with Alice's context.
+
+**Commands need a human.** When the agent wants a shell, everyone sees a card
+with the exact command. The first person to click decides it — the database
+update is conditional on the card still being pending, so a second click gets a
+409 rather than overriding the first.
+
+![An approval card, approved, with test output streaming in](docs/media/approval-card.jpg)
+
+**Team chat the model cannot read.** It lives on its own WebSocket, in its own
+module, with its own table — and [a test greps the agent's modules](tests/e2e/06-chat.mjs)
+to prove no import path reaches it. Structural, not a filter.
+
+**Long sessions keep working.** Past a token budget, the oldest half of the
+thread is summarised into a rolling memory that preserves who asked for what.
+Five merges deep, the agent still attributes decisions to the right person.
+
+## How it is built
+
+```
+  browser ──┬── /sync      Yjs documents, one per open file   (Hocuspocus)
+            ├── /events    file tree, presence, streamed answers, approval cards
+            ├── /chat      team chat, deliberately separate
+            └── /terminal  one shell per person            (node-pty → docker exec)
+                                │
+            Express + SQLite ───┤
+                                └── Docker ── one container per workspace,
+                                              non-root, all capabilities dropped
+```
+
+TypeScript throughout: React and CodeMirror 6 on the front, Express and SQLite on
+the back, Yjs for convergence, Docker for isolation, the Claude API for the
+agent. No framework doing the hard parts.
+
+## Testing
+
+**131 checks run on every push**, across two Node versions, with no API key
+required — the server falls back to a stub provider, so CI exercises sync, auth,
+restarts and the browser UI for free.
+
+| Tier | What it holds the line on |
+| --- | --- |
+| Unit (31) | merge maths, path containment, token signing, cache request shape |
+| End to end (7 suites) | each milestone's "done when", against real Yjs, real containers, a real model |
+| Security (21) | path traversal, cross-workspace access over 8 endpoints and 4 sockets, forged tokens |
+| Resilience (9) | kills and restarts its own servers: no duplication, queue resumes |
+| Load | 50 concurrent editors and 1500 edits with none lost; 80 sockets; a 20-request pile-on |
+| Browser (8) | Playwright, two real browser contexts as two people |
+
+The browser tests were themselves checked against the bug they exist to catch: an
+earlier version passed against a deliberately broken layout, which is why they
+assert that content is *reachable* rather than merely that the page does not
+scroll.
+
+## Status
+
+Milestones 1–8 of [SPEC.md](SPEC.md) are implemented. It is ready for a team who
+trust each other, behind TLS. [`DEPLOY.md`](DEPLOY.md) is explicit about what
+would have to change before strangers get a link — real authentication instead of
+invite links, per-user containers, egress limits, a spend cap. Writing that down
+was part of the exercise.
 
 ## Running it
 
@@ -44,22 +125,17 @@ See [deploy/README.md](deploy/README.md) for the runbook, and
 in front for TLS, the server under systemd on the host (it needs the Docker
 socket), workspace data on disk and backed up nightly.
 
-## Tests
+## Running the tests
 
-Three tiers, cheapest first.
-
-**Unit** — pure logic, no server, no network, runs in a quarter of a second.
-Covers the text-merge maths that keeps terminal writes from eating unsaved
-typing, workspace path containment, and token signing.
+**Unit** — pure logic, no server, no network, a quarter of a second.
 
 ```bash
 npm test            # typecheck + unit tests
 npm run test:unit
 ```
 
-**End to end** — one suite per milestone plus security and resilience, against
-a server that is already up. Real Yjs documents, real containers and shells,
-and the real model when `ANTHROPIC_API_KEY` is set.
+**End to end** — against a server that is already up. Real Yjs documents, real
+containers and shells, and the real model when `ANTHROPIC_API_KEY` is set.
 
 ```bash
 npm run dev              # in one terminal

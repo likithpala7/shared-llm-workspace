@@ -42,6 +42,86 @@ const containerName = (workspaceId: string) => `slw-${workspaceId}`;
 /** Serialises concurrent "start me a shell" calls for the same workspace. */
 const starting = new Map<string, Promise<string>>();
 
+/**
+ * A container costs its memory reservation whether or not anyone is using it.
+ * On a shared box that is the difference between a quiet afternoon and an
+ * outage, so idle ones are stopped. Their files live on the host, so stopping
+ * loses nothing; the next shell starts the container again.
+ */
+const IDLE_MINUTES = Number(process.env.IDLE_CONTAINER_MINUTES ?? 30);
+const REAP_INTERVAL_MS = Number(process.env.REAP_INTERVAL_MS ?? 5 * 60 * 1000);
+
+/** When each workspace was last used, and how many shells are attached. */
+const lastUsed = new Map<string, number>();
+const openShells = new Map<string, number>();
+
+export function touchWorkspace(workspaceId: string): void {
+  lastUsed.set(workspaceId, Date.now());
+}
+
+/** A workspace with a shell attached is never idle, however quiet it is. */
+export function shellOpened(workspaceId: string): void {
+  openShells.set(workspaceId, (openShells.get(workspaceId) ?? 0) + 1);
+  touchWorkspace(workspaceId);
+}
+
+export function shellClosed(workspaceId: string): void {
+  const remaining = (openShells.get(workspaceId) ?? 1) - 1;
+  if (remaining > 0) openShells.set(workspaceId, remaining);
+  else openShells.delete(workspaceId);
+  touchWorkspace(workspaceId);
+}
+
+/**
+ * Stops containers nobody has touched recently. Returns the workspace ids it
+ * stopped, which is what the tests assert on.
+ */
+export async function reapIdleContainers(now = Date.now()): Promise<string[]> {
+  const idleFor = IDLE_MINUTES * 60 * 1000;
+  const stopped: string[] = [];
+
+  let containers;
+  try {
+    containers = await docker.listContainers({ filters: { label: ['slw.workspace'] } });
+  } catch (error) {
+    console.error('[reaper] could not list containers:', (error as Error).message);
+    return stopped;
+  }
+
+  for (const info of containers) {
+    const workspaceId = info.Labels?.['slw.workspace'];
+    if (!workspaceId) continue;
+    if ((openShells.get(workspaceId) ?? 0) > 0) continue;
+
+    // A container this server has not seen used is dated from when it started,
+    // so one left behind by a previous process is still eligible.
+    const since = lastUsed.get(workspaceId) ?? info.Created * 1000;
+    if (now - since < idleFor) continue;
+
+    try {
+      await docker.getContainer(info.Id).stop({ t: 5 });
+      lastUsed.delete(workspaceId);
+      stopped.push(workspaceId);
+      console.log(
+        `[reaper] stopped ${workspaceId} after ${Math.round((now - since) / 60000)} minutes idle`,
+      );
+    } catch (error) {
+      // Already stopping, or gone. Nothing to do.
+      if ((error as { statusCode?: number }).statusCode !== 304) {
+        console.error(`[reaper] could not stop ${workspaceId}:`, (error as Error).message);
+      }
+    }
+  }
+  return stopped;
+}
+
+export function startReaper(): NodeJS.Timeout {
+  console.log(`[reaper] stopping containers idle for ${IDLE_MINUTES} minutes`);
+  const timer = setInterval(() => void reapIdleContainers(), REAP_INTERVAL_MS);
+  timer.unref();
+  return timer;
+}
+
 async function pullImageIfMissing(): Promise<void> {
   const images = await docker.listImages({ filters: { reference: [IMAGE] } });
   if (images.length > 0) return;
@@ -160,6 +240,7 @@ async function verifyMount(workspaceId: string, hostPath: string): Promise<void>
 }
 
 export async function ensureContainer(workspaceId: string): Promise<string> {
+  touchWorkspace(workspaceId);
   const inFlight = starting.get(workspaceId);
   if (inFlight) return inFlight;
 
